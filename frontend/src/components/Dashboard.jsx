@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Users, CreditCard, DollarSign, AlertTriangle, TrendingUp, Bell } from 'lucide-react';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, CartesianGrid } from 'recharts';
+import { Link } from 'react-router-dom';
+import {
+  Users, CreditCard, DollarSign, AlertTriangle, TrendingUp, Bell,
+  Building2, ShieldAlert, ChevronRight, Activity,
+} from 'lucide-react';
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, AreaChart, Area, Legend, CartesianGrid,
+} from 'recharts';
 import { dashboardAPI, alertsAPI } from '../services/api';
-
-const RISK_COLORS = { 'Bajo': '#10b981', 'Medio': '#f59e0b', 'Alto': '#f97316', 'Crítico': '#ef4444' };
+import { RISK_COLORS, COOP } from '../theme';
 
 function formatCurrency(n) {
   if (n == null) return '$0';
@@ -20,11 +26,12 @@ function formatNumber(n) {
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{ background: '#1a2035', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '12px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
-      <p style={{ color: '#f1f5f9', fontWeight: 600, marginBottom: 6, fontSize: 13 }}>{label}</p>
+    <div className="chart-tooltip">
+      <p className="chart-tooltip-label">{label}</p>
       {payload.map((entry, i) => (
         <p key={i} style={{ color: entry.color, fontSize: 12, margin: '2px 0' }}>
-          {entry.name}: {typeof entry.value === 'number' && entry.name?.includes('$') ? formatCurrency(entry.value) : entry.value}
+          {entry.name}: {typeof entry.value === 'number' && entry.name?.includes('$')
+            ? formatCurrency(entry.value) : entry.value}
         </p>
       ))}
     </div>
@@ -40,207 +47,312 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      dashboardAPI.getOverview().catch(() => null),
-      dashboardAPI.getRiskDistribution().catch(() => []),
-      dashboardAPI.getTrend().catch(() => []),
-      dashboardAPI.getRiskByAgency().catch(() => []),
-      alertsAPI.getAll().catch(() => []),
-    ]).then(([ov, rd, tr, ag, al]) => {
+    let cancelled = false;
+
+    Promise.allSettled([
+      dashboardAPI.getOverview(),
+      dashboardAPI.getRiskDistribution(),
+      dashboardAPI.getTrend(),
+      dashboardAPI.getRiskByAgency(),
+    ]).then((results) => {
+      if (cancelled) return;
+      const [ov, rd, tr, ag] = results.map((r) =>
+        r.status === 'fulfilled' ? r.value : null
+      );
       setOverview(ov);
       setRiskDist(Array.isArray(rd) ? rd : []);
       setTrend(Array.isArray(tr) ? tr : []);
       setByAgency(Array.isArray(ag) ? ag : []);
-      const alertList = Array.isArray(al) ? al : (al?.alerts || []);
-      setAlerts(alertList.slice(0, 8));
       setLoading(false);
-    });
+    }).catch(() => { if (!cancelled) setLoading(false); });
+
+    alertsAPI.getAll()
+      .then((al) => {
+        if (!cancelled) {
+          const list = Array.isArray(al) ? al : (al?.alerts || []);
+          setAlerts(list.slice(0, 6));
+        }
+      })
+      .catch(() => { if (!cancelled) setAlerts([]); });
+
+    return () => { cancelled = true; };
   }, []);
 
   if (loading) {
     return (
       <div className="loading-container">
         <div className="spinner" />
-        <div className="loading-text">Cargando panel de control...</div>
+        <div className="loading-text">Cargando indicadores de cartera...</div>
       </div>
     );
   }
 
-  const kpis = [
-    { label: 'Socios Activos', value: formatNumber(overview?.total_socios), icon: Users, color: 'accent' },
-    { label: 'Créditos Vigentes', value: formatNumber(overview?.creditos_vigentes), icon: CreditCard, color: 'success' },
-    { label: 'Cartera Total', value: formatCurrency(overview?.cartera_total), icon: DollarSign, color: 'warning' },
-    { label: 'Tasa de Morosidad', value: `${(overview?.tasa_morosidad || 0).toFixed(1)}%`, icon: AlertTriangle, color: 'danger' },
-  ];
+  const totalRiesgo = (overview?.socios_riesgo_alto || 0) + (overview?.socios_riesgo_critico || 0);
+  const totalSocios = overview?.total_socios || 1;
+  const pctRiesgo = ((totalRiesgo / totalSocios) * 100).toFixed(1);
 
-  const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+  const metrics = overview ? [
+    { key: 'socios', label: 'Socios activos', value: formatNumber(overview.total_socios), icon: Users, tone: 'green' },
+    { key: 'creditos', label: 'Créditos vigentes', value: formatNumber(overview.creditos_vigentes), icon: CreditCard, tone: 'green' },
+    { key: 'cartera', label: 'Cartera colocada', value: formatCurrency(overview.cartera_total), icon: DollarSign, tone: 'gold' },
+    { key: 'mora', label: 'Tasa de morosidad', value: `${(overview.tasa_morosidad || 0).toFixed(1)}%`, icon: Activity, tone: 'risk' },
+    { key: 'alto', label: 'Riesgo alto', value: formatNumber(overview.socios_riesgo_alto), icon: ShieldAlert, tone: 'warn' },
+    { key: 'critico', label: 'Riesgo crítico', value: formatNumber(overview.socios_riesgo_critico), icon: AlertTriangle, tone: 'critical' },
+    { key: 'monto', label: 'Exposición en riesgo', value: formatCurrency(overview.monto_en_riesgo), icon: DollarSign, tone: 'warn' },
+  ] : [];
+
+  const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
     if (percent < 0.05) return null;
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     return (
-      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600}>
+      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>
         {`${(percent * 100).toFixed(0)}%`}
       </text>
     );
   };
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Panel de Control</h1>
-        <p>Monitoreo integral del riesgo crediticio en tiempo real</p>
-      </div>
-
-      {/* KPIs */}
-      <div className="kpi-grid">
-        {kpis.map((kpi, i) => (
-          <div key={i} className={`kpi-card ${kpi.color} animate-in`}>
-            <div className={`kpi-icon ${kpi.color}`}>
-              <kpi.icon size={22} />
+    <div className="dashboard-page">
+      {/* Hero institucional */}
+      <section className="dashboard-hero">
+        <div className="dashboard-hero-content">
+          <div className="dashboard-hero-text">
+            <span className="dashboard-hero-eyebrow">Cooperativa Tulcán · Carchi</span>
+            <h1>Panel de Riesgo Crediticio</h1>
+            <p>
+              Vista consolidada de cartera, morosidad y alertas del motor <strong>Radar-Mora</strong>.
+              Datos actualizados para gestión proactiva con socios.
+            </p>
+          </div>
+          <div className="dashboard-hero-stats">
+            <div className="hero-stat hero-stat--gold">
+              <span className="hero-stat-value">{pctRiesgo}%</span>
+              <span className="hero-stat-label">Socios en riesgo alto/crítico</span>
             </div>
-            <div className="kpi-value">{kpi.value}</div>
-            <div className="kpi-label">{kpi.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Additional KPIs row */}
-      {overview && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 24 }}>
-          <div className="kpi-card danger animate-in">
-            <div className="kpi-icon danger"><AlertTriangle size={22} /></div>
-            <div className="kpi-value">{formatNumber(overview.socios_riesgo_alto)}</div>
-            <div className="kpi-label">Socios Riesgo Alto</div>
-          </div>
-          <div className="kpi-card danger animate-in">
-            <div className="kpi-icon danger" style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}><AlertTriangle size={22} /></div>
-            <div className="kpi-value">{formatNumber(overview.socios_riesgo_critico)}</div>
-            <div className="kpi-label">Socios Riesgo Crítico</div>
-          </div>
-          <div className="kpi-card warning animate-in">
-            <div className="kpi-icon warning"><DollarSign size={22} /></div>
-            <div className="kpi-value">{formatCurrency(overview.monto_en_riesgo)}</div>
-            <div className="kpi-label">Monto en Riesgo</div>
+            <div className="hero-stat hero-stat--green">
+              <span className="hero-stat-value">{alerts.length}</span>
+              <span className="hero-stat-label">Alertas activas</span>
+            </div>
+            <Link to="/alertas" className="hero-stat-link">
+              Ver alertas <ChevronRight size={16} />
+            </Link>
           </div>
         </div>
-      )}
+      </section>
 
-      {/* Charts Row 1 */}
-      <div className="chart-grid">
-        <div className="card animate-in">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Distribución de Riesgo</div>
-              <div className="card-subtitle">Clasificación por nivel de riesgo</div>
-            </div>
+      {/* Resumen ejecutivo unificado */}
+      <section className="dashboard-section">
+        <div className="section-heading">
+          <Building2 size={20} className="section-heading-icon" />
+          <div>
+            <h2>Resumen ejecutivo</h2>
+            <p>Indicadores clave de la cooperativa al día de hoy</p>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie
-                data={riskDist}
-                cx="50%"
-                cy="50%"
-                innerRadius={70}
-                outerRadius={120}
-                dataKey="cantidad"
-                nameKey="nivel"
-                labelLine={false}
-                label={renderPieLabel}
-                strokeWidth={2}
-                stroke="rgba(10,14,26,0.8)"
-              >
-                {riskDist.map((entry, i) => (
-                  <Cell key={i} fill={entry.color || RISK_COLORS[entry.nivel] || '#6366f1'} />
-                ))}
-              </Pie>
-              <Tooltip content={<CustomTooltip />} />
-              <Legend
-                verticalAlign="bottom"
-                formatter={(value) => <span style={{ color: '#94a3b8', fontSize: 12 }}>{value}</span>}
-              />
-            </PieChart>
-          </ResponsiveContainer>
         </div>
 
-        <div className="card animate-in">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Riesgo por Agencia</div>
-              <div className="card-subtitle">Distribución geográfica del riesgo</div>
+        <div className="metrics-panel">
+          {metrics.map((m) => (
+            <div key={m.key} className={`metric-cell metric-cell--${m.tone}`}>
+              <div className="metric-cell-icon">
+                <m.icon size={20} />
+              </div>
+              <div className="metric-cell-body">
+                <span className="metric-cell-value">{m.value}</span>
+                <span className="metric-cell-label">{m.label}</span>
+              </div>
             </div>
-          </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={byAgency} layout="vertical" margin={{ left: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis type="category" dataKey="agencia" width={100} tick={{ fontSize: 11 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="bajo" name="Bajo" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
-              <Bar dataKey="medio" name="Medio" stackId="a" fill="#f59e0b" />
-              <Bar dataKey="alto" name="Alto" stackId="a" fill="#f97316" />
-              <Bar dataKey="critico" name="Crítico" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Charts Row 2 */}
-      <div className="chart-grid">
-        <div className="card animate-in">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Tendencia de Morosidad</div>
-              <div className="card-subtitle">Evolución de la tasa de mora en los últimos 12 meses</div>
-            </div>
-            <TrendingUp size={18} style={{ color: 'var(--text-muted)' }} />
-          </div>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={trend}>
-              <defs>
-                <linearGradient id="colorMora" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="tasa_morosidad" name="Tasa Mora (%)" stroke="#ef4444" fill="url(#colorMora)" strokeWidth={2} dot={{ r: 3 }} />
-            </AreaChart>
-          </ResponsiveContainer>
+          ))}
         </div>
 
-        <div className="card animate-in">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Alertas Recientes</div>
-              <div className="card-subtitle">Últimas notificaciones del sistema</div>
-            </div>
-            <Bell size={18} style={{ color: 'var(--text-muted)' }} />
-          </div>
-          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-            {alerts.length === 0 ? (
-              <div className="empty-state"><p>No hay alertas recientes</p></div>
-            ) : (
-              alerts.map((alert, i) => (
-                <div key={i} className="alert-item" style={{ padding: '10px 12px', marginBottom: 6 }}>
-                  <div className={`alert-icon ${alert.prioridad || 'media'}`}>
-                    <AlertTriangle size={16} />
+        {/* Barra de distribución de riesgo integrada */}
+        {riskDist.length > 0 && (
+          <div className="risk-strip">
+            <span className="risk-strip-title">Composición de riesgo en cartera</span>
+            <div className="risk-strip-bars">
+              {riskDist.map((r) => {
+                const total = riskDist.reduce((s, x) => s + (x.cantidad || 0), 0) || 1;
+                const pct = ((r.cantidad || 0) / total) * 100;
+                const color = RISK_COLORS[r.nivel] || COOP.verdePrimario;
+                return (
+                  <div
+                    key={r.nivel}
+                    className="risk-strip-segment"
+                    style={{ width: `${Math.max(pct, 4)}%`, background: color }}
+                    title={`${r.nivel}: ${r.cantidad} (${pct.toFixed(1)}%)`}
+                  >
+                    {pct >= 8 && <span>{r.nivel}</span>}
                   </div>
-                  <div className="alert-content">
-                    <div className="alert-title">{alert.socio_nombre || 'Socio'}</div>
-                    <div className="alert-message">{alert.mensaje}</div>
-                    <div className="alert-meta">{alert.fecha} · Score: {alert.risk_score}</div>
-                  </div>
-                </div>
-              ))
-            )}
+                );
+              })}
+            </div>
+            <div className="risk-strip-legend">
+              {riskDist.map((r) => (
+                <span key={r.nivel} className="risk-legend-item">
+                  <i style={{ background: RISK_COLORS[r.nivel] }} />
+                  {r.nivel}: <strong>{r.cantidad}</strong> ({r.porcentaje}%)
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Análisis gráfico */}
+      <section className="dashboard-section">
+        <div className="section-heading">
+          <TrendingUp size={20} className="section-heading-icon" />
+          <div>
+            <h2>Análisis de cartera</h2>
+            <p>Distribución por nivel de riesgo y por agencia</p>
           </div>
         </div>
-      </div>
+
+        <div className="chart-grid">
+          <div className="card card--chart">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Distribución por nivel</div>
+                <div className="card-subtitle">Clasificación del modelo de IA</div>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie
+                  data={riskDist}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={65}
+                  outerRadius={105}
+                  dataKey="cantidad"
+                  nameKey="nivel"
+                  labelLine={false}
+                  label={renderPieLabel}
+                  strokeWidth={2}
+                  stroke="#fff"
+                >
+                  {riskDist.map((entry, i) => (
+                    <Cell key={i} fill={entry.color || RISK_COLORS[entry.nivel]} />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+                <Legend verticalAlign="bottom" formatter={(v) => <span className="legend-text">{v}</span>} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="card card--chart">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Riesgo por agencia</div>
+                <div className="card-subtitle">Tulcán, Ipiales y sucursales</div>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={byAgency} layout="vertical" margin={{ left: 8, right: 12 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="agencia" width={88} tick={{ fontSize: 11 }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="bajo" name="Bajo" stackId="a" fill={RISK_COLORS.Bajo} />
+                <Bar dataKey="medio" name="Medio" stackId="a" fill={RISK_COLORS.Medio} />
+                <Bar dataKey="alto" name="Alto" stackId="a" fill={RISK_COLORS.Alto} />
+                <Bar dataKey="critico" name="Crítico" stackId="a" fill={RISK_COLORS.Crítico} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </section>
+
+      {/* Seguimiento y alertas */}
+      <section className="dashboard-section">
+        <div className="section-heading">
+          <Bell size={20} className="section-heading-icon" />
+          <div>
+            <h2>Seguimiento y alertas</h2>
+            <p>Tendencia de mora y casos que requieren atención</p>
+          </div>
+          <Link to="/alertas" className="section-heading-action">
+            Ver todas <ChevronRight size={16} />
+          </Link>
+        </div>
+
+        <div className="chart-grid">
+          <div className="card card--chart">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Tendencia de morosidad</div>
+                <div className="card-subtitle">Últimos 12 meses · pagos atrasados</div>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={trend}>
+                <defs>
+                  <linearGradient id="colorMora" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={RISK_COLORS.Crítico} stopOpacity={0.25} />
+                    <stop offset="95%" stopColor={RISK_COLORS.Crítico} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} unit="%" />
+                <Tooltip content={<CustomTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="tasa_morosidad"
+                  name="Tasa mora (%)"
+                  stroke={RISK_COLORS.Crítico}
+                  fill="url(#colorMora)"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: RISK_COLORS.Crítico }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="card card--alerts">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Alertas prioritarias</div>
+                <div className="card-subtitle">Detección temprana Radar-Mora</div>
+              </div>
+              {alerts.length > 0 && (
+                <span className="alerts-count-badge">{alerts.length}</span>
+              )}
+            </div>
+            <div className="alerts-feed">
+              {alerts.length === 0 ? (
+                <div className="empty-state"><p>Sin alertas pendientes</p></div>
+              ) : (
+                alerts.map((alert, i) => (
+                  <Link
+                    key={alert.id || i}
+                    to={`/socios/${alert.socio_id}`}
+                    className={`alert-feed-item prioridad-${alert.prioridad || 'media'}`}
+                  >
+                    <div className={`alert-icon ${alert.prioridad || 'media'}`}>
+                      <AlertTriangle size={15} />
+                    </div>
+                    <div className="alert-content">
+                      <div className="alert-title">{alert.socio_nombre}</div>
+                      <div className="alert-message">
+                        {alert.tipo}
+                        {alert.mensaje && ` · ${alert.mensaje.length > 55 ? `${alert.mensaje.slice(0, 55)}…` : alert.mensaje}`}
+                      </div>
+                    </div>
+                    <span className={`badge ${(alert.risk_level || '').toLowerCase().replace('í', 'i')}`}>
+                      {alert.risk_score}
+                    </span>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

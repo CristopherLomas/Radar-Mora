@@ -48,7 +48,14 @@ def main():
         print(f"   Accuracy: {info.get('accuracy', 'N/A')}")
         print(f"   Último entrenamiento: {info.get('last_trained', 'N/A')}")
 
-    # Paso 3: Iniciar servidor
+    # Paso 3: Precalentar caché de predicciones (evita carga lenta en el primer request)
+    if model_exists():
+        print("\n⚡ Precalentando predicciones de riesgo...")
+        from models.risk_model import predict_all
+        risks = predict_all()
+        print(f"   ✅ {len(risks)} socios listos en caché")
+
+    # Paso 4: Iniciar servidor
     print("\n" + "=" * 60)
     print("  🚀 Iniciando servidor FastAPI...")
     print("  📡 URL: http://localhost:8000")

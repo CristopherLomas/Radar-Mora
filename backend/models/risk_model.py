@@ -5,6 +5,7 @@ CoopTech Tulcán - Sistema de Perfilamiento de Riesgo.
 
 import os
 import sqlite3
+import threading
 import numpy as np
 import pandas as pd
 import joblib
@@ -39,6 +40,22 @@ FEATURE_DESCRIPTIONS = {
 }
 
 FEATURE_NAMES = list(FEATURE_DESCRIPTIONS.keys())
+
+_predict_all_cache: list[dict] | None = None
+_predict_all_cache_stamp: tuple[float, float] | None = None
+_predict_all_lock = threading.Lock()
+
+
+def _current_predict_all_stamp() -> tuple[float, float]:
+    model_mtime = os.path.getmtime(MODEL_PATH) if os.path.exists(MODEL_PATH) else 0.0
+    db_mtime = os.path.getmtime(DB_PATH) if os.path.exists(DB_PATH) else 0.0
+    return (model_mtime, db_mtime)
+
+
+def _invalidate_predict_all_cache() -> None:
+    global _predict_all_cache, _predict_all_cache_stamp
+    _predict_all_cache = None
+    _predict_all_cache_stamp = None
 
 
 def _get_connection():
@@ -441,6 +458,7 @@ def train_model() -> dict:
     print(f"\n   ✅ Modelo guardado en: {MODEL_PATH}")
     print("=" * 60)
 
+    _invalidate_predict_all_cache()
     return metrics
 
 
@@ -554,36 +572,56 @@ def predict_risk(socio_id: int) -> dict:
 def predict_all() -> list[dict]:
     """
     Predice el riesgo para todos los socios con créditos activos.
+    Resultados en caché en memoria para evitar recalcular en cada request.
     
     Returns:
         Lista de dicts con socio_id, risk_score, risk_level.
     """
-    model = _load_model()
-    features_df = compute_features()
+    global _predict_all_cache, _predict_all_cache_stamp
 
-    if features_df.empty:
-        return []
+    cache_key = _current_predict_all_stamp()
+    if _predict_all_cache is not None and _predict_all_cache_stamp == cache_key:
+        return _predict_all_cache
 
-    results = []
-    for _, row in features_df.iterrows():
-        feature_values = {f: float(row[f]) for f in FEATURE_NAMES}
-        for k in feature_values:
-            if np.isnan(feature_values[k]) or np.isinf(feature_values[k]):
-                feature_values[k] = 0.0
+    with _predict_all_lock:
+        if _predict_all_cache is not None and _predict_all_cache_stamp == cache_key:
+            return _predict_all_cache
 
-        X = np.array([[feature_values[f] for f in FEATURE_NAMES]])
+        model = _load_model()
+        features_df = compute_features()
+
+        if features_df.empty:
+            _predict_all_cache = []
+            _predict_all_cache_stamp = cache_key
+            return []
+
+        X = features_df[FEATURE_NAMES].astype(float).values
         X = np.nan_to_num(X, nan=0.0, posinf=100.0, neginf=-100.0)
 
-        risk_level = model.predict(X)[0]
-        risk_score = _compute_risk_score(feature_values, model, FEATURE_NAMES)
+        risk_levels = model.predict(X)
+        probas = model.predict_proba(X)
+        class_scores = {"Bajo": 10, "Medio": 40, "Alto": 70, "Crítico": 95}
+        risk_scores = np.zeros(len(probas))
+        for i, cls in enumerate(model.classes_):
+            risk_scores += class_scores.get(cls, 50) * probas[:, i]
+        risk_scores = np.clip(risk_scores, 0, 100).round(1)
 
-        results.append({
-            "socio_id": int(row["socio_id"]),
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-        })
+        results = [
+            {
+                "socio_id": int(sid),
+                "risk_score": float(score),
+                "risk_level": level,
+            }
+            for sid, score, level in zip(
+                features_df["socio_id"].values,
+                risk_scores,
+                risk_levels,
+            )
+        ]
 
-    return results
+        _predict_all_cache = results
+        _predict_all_cache_stamp = cache_key
+        return results
 
 
 def get_feature_importance() -> list[dict]:
