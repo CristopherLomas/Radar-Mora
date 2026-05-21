@@ -8,6 +8,14 @@ start.py - Script de inicio para CoopTech Tulcán.
 import sys
 import os
 
+# Consola Windows: evitar crash por emojis (UnicodeEncodeError)
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # Asegurar que el directorio backend esté en el path
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, backend_dir)

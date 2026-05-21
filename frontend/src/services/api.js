@@ -1,5 +1,9 @@
-const API_BASE = 'http://localhost:8000/api';
-const DEFAULT_TIMEOUT_MS = 120000;
+// En desarrollo usa el proxy de Vite (/api → localhost:8000)
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? '/api' : 'http://localhost:8000/api');
+
+const DEFAULT_TIMEOUT_MS = 180000;
 
 async function fetchJSON(url, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -13,6 +17,19 @@ async function fetchJSON(url, timeoutMs = DEFAULT_TIMEOUT_MS) {
       throw new Error(`API timeout: ${url}`);
     }
     throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function checkApiHealth() {
+  const base = import.meta.env.DEV ? '' : 'http://localhost:8000';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${base}/health`, { signal: controller.signal });
+    if (!res.ok) throw new Error('health failed');
+    return res.json();
   } finally {
     clearTimeout(timer);
   }
