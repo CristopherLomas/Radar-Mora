@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [trend, setTrend] = useState([]);
   const [byAgency, setByAgency] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [totalAlerts, setTotalAlerts] = useState(0);
   const [extendedStats, setExtendedStats] = useState(null);
   const [extendedLoading, setExtendedLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -73,6 +74,10 @@ export default function Dashboard() {
       .then((al) => {
         if (!cancelled) {
           const list = Array.isArray(al) ? al : (al?.alerts || []);
+          const totalCount = al && !Array.isArray(al) && al.total_counts
+            ? (al.total_counts.alta + al.total_counts.media + al.total_counts.baja)
+            : list.length;
+          setTotalAlerts(totalCount);
           setAlerts(list.slice(0, 6));
         }
       })
@@ -178,7 +183,7 @@ export default function Dashboard() {
               <span className="hero-stat-label">Socios en riesgo alto/crítico</span>
             </div>
             <div className="hero-stat hero-stat--green">
-              <span className="hero-stat-value">{alerts.length}</span>
+              <span className="hero-stat-value">{totalAlerts}</span>
               <span className="hero-stat-label">Alertas activas</span>
             </div>
             <Link to="/alertas" className="hero-stat-link">

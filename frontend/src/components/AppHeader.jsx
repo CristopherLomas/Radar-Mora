@@ -11,9 +11,10 @@ export default function AppHeader() {
   useEffect(() => {
     alertsAPI.getAll()
       .then((data) => {
-        const alerts = Array.isArray(data) ? data : (data.alerts || []);
-        const high = alerts.filter((a) => a.prioridad === 'alta' || a.prioridad === 'critica').length;
-        setAlertCount(high);
+        const total = data && !Array.isArray(data) && data.total_counts
+          ? (data.total_counts.alta + data.total_counts.media + data.total_counts.baja)
+          : (Array.isArray(data) ? data.length : (data?.alerts || []).length);
+        setAlertCount(total);
       })
       .catch(() => setAlertCount(0));
   }, [location.pathname]);
