@@ -68,6 +68,17 @@ def _get_connection():
     return conn
 
 
+def _table_exists(name: str) -> bool:
+    """Verifica si una tabla existe en la base de datos."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    row = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def compute_features(socio_id: int = None) -> pd.DataFrame:
     """
     Recupera las features de riesgo reales desde 'dataset_maestro' en SQLite,
@@ -75,46 +86,86 @@ def compute_features(socio_id: int = None) -> pd.DataFrame:
     """
     conn = _get_connection()
     
-    if socio_id:
-        query = """
-            SELECT 
-                cliente as socio_id,
-                MAX(saldo_disponible) as saldo_disponible,
-                MAX(num_transacciones) as num_transacciones,
-                MAX(volumen_total) as volumen_total,
-                MAX(cambio_saldo_ahorro) as cambio_saldo_ahorro,
-                MAX(alerta_retiro_ahorros) as alerta_retiro_ahorros,
-                MAX(alerta_caida_actividad) as alerta_caida_actividad,
-                MAX(alerta_critica_ia) as alerta_critica_ia,
-                MAX(ingresos_socio) as ingresos_socio,
-                MAX(egresos_socio) as egresos_socio,
-                MAX(nro_cargas_fam) as nro_cargas_fam,
-                COUNT(nro_operacion) as nro_creditos
-            FROM dataset_maestro
-            WHERE cliente = ?
-            GROUP BY cliente
-        """
-        df = pd.read_sql_query(query, conn, params=(socio_id,))
+    if _table_exists("dataset_maestro"):
+        if socio_id:
+            query = """
+                SELECT 
+                    cliente as socio_id,
+                    MAX(saldo_disponible) as saldo_disponible,
+                    MAX(num_transacciones) as num_transacciones,
+                    MAX(volumen_total) as volumen_total,
+                    MAX(cambio_saldo_ahorro) as cambio_saldo_ahorro,
+                    MAX(alerta_retiro_ahorros) as alerta_retiro_ahorros,
+                    MAX(alerta_caida_actividad) as alerta_caida_actividad,
+                    MAX(alerta_critica_ia) as alerta_critica_ia,
+                    MAX(ingresos_socio) as ingresos_socio,
+                    MAX(egresos_socio) as egresos_socio,
+                    MAX(nro_cargas_fam) as nro_cargas_fam,
+                    COUNT(nro_operacion) as nro_creditos
+                FROM dataset_maestro
+                WHERE cliente = ?
+                GROUP BY cliente
+            """
+            df = pd.read_sql_query(query, conn, params=(socio_id,))
+        else:
+            query = """
+                SELECT 
+                    cliente as socio_id,
+                    MAX(saldo_disponible) as saldo_disponible,
+                    MAX(num_transacciones) as num_transacciones,
+                    MAX(volumen_total) as volumen_total,
+                    MAX(cambio_saldo_ahorro) as cambio_saldo_ahorro,
+                    MAX(alerta_retiro_ahorros) as alerta_retiro_ahorros,
+                    MAX(alerta_caida_actividad) as alerta_caida_actividad,
+                    MAX(alerta_critica_ia) as alerta_critica_ia,
+                    MAX(ingresos_socio) as ingresos_socio,
+                    MAX(egresos_socio) as egresos_socio,
+                    MAX(nro_cargas_fam) as nro_cargas_fam,
+                    COUNT(nro_operacion) as nro_creditos
+                FROM dataset_maestro
+                GROUP BY cliente
+            """
+            df = pd.read_sql_query(query, conn)
     else:
-        query = """
-            SELECT 
-                cliente as socio_id,
-                MAX(saldo_disponible) as saldo_disponible,
-                MAX(num_transacciones) as num_transacciones,
-                MAX(volumen_total) as volumen_total,
-                MAX(cambio_saldo_ahorro) as cambio_saldo_ahorro,
-                MAX(alerta_retiro_ahorros) as alerta_retiro_ahorros,
-                MAX(alerta_caida_actividad) as alerta_caida_actividad,
-                MAX(alerta_critica_ia) as alerta_critica_ia,
-                MAX(ingresos_socio) as ingresos_socio,
-                MAX(egresos_socio) as egresos_socio,
-                MAX(nro_cargas_fam) as nro_cargas_fam,
-                COUNT(nro_operacion) as nro_creditos
-            FROM dataset_maestro
-            GROUP BY cliente
-        """
-        df = pd.read_sql_query(query, conn)
-        
+        # Fallback sintético robusto usando tablas relacionales estándar
+        if socio_id:
+            query = """
+                SELECT 
+                    s.id as socio_id,
+                    COALESCE((SELECT t.saldo_resultante FROM transacciones t WHERE t.socio_id = s.id ORDER BY t.id DESC LIMIT 1), 100.0) as saldo_disponible,
+                    COALESCE((SELECT COUNT(*) FROM transacciones t WHERE t.socio_id = s.id), 0) as num_transacciones,
+                    COALESCE((SELECT SUM(t.monto) FROM transacciones t WHERE t.socio_id = s.id), 0.0) as volumen_total,
+                    0.0 as cambio_saldo_ahorro,
+                    CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as alerta_retiro_ahorros,
+                    CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as alerta_caida_actividad,
+                    CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as alerta_critica_ia,
+                    COALESCE((SELECT MAX(c.cuota_mensual) * 3.5 FROM creditos c WHERE c.socio_id = s.id), 1200.0) as ingresos_socio,
+                    COALESCE((SELECT MAX(c.cuota_mensual) * 3.0 FROM creditos c WHERE c.socio_id = s.id), 1000.0) as egresos_socio,
+                    (s.id % 4) as nro_cargas_fam,
+                    COALESCE((SELECT COUNT(*) FROM creditos c WHERE c.socio_id = s.id), 0) as nro_creditos
+                FROM socios s
+                WHERE s.id = ?
+            """
+            df = pd.read_sql_query(query, conn, params=(socio_id,))
+        else:
+            query = """
+                SELECT 
+                    s.id as socio_id,
+                    COALESCE((SELECT t.saldo_resultante FROM transacciones t WHERE t.socio_id = s.id ORDER BY t.id DESC LIMIT 1), 100.0) as saldo_disponible,
+                    COALESCE((SELECT COUNT(*) FROM transacciones t WHERE t.socio_id = s.id), 0) as num_transacciones,
+                    COALESCE((SELECT SUM(t.monto) FROM transacciones t WHERE t.socio_id = s.id), 0.0) as volumen_total,
+                    0.0 as cambio_saldo_ahorro,
+                    CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as alerta_retiro_ahorros,
+                    CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as alerta_caida_actividad,
+                    CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as alerta_critica_ia,
+                    COALESCE((SELECT MAX(c.cuota_mensual) * 3.5 FROM creditos c WHERE c.socio_id = s.id), 1200.0) as ingresos_socio,
+                    COALESCE((SELECT MAX(c.cuota_mensual) * 3.0 FROM creditos c WHERE c.socio_id = s.id), 1000.0) as egresos_socio,
+                    (s.id % 4) as nro_cargas_fam,
+                    COALESCE((SELECT COUNT(*) FROM creditos c WHERE c.socio_id = s.id), 0) as nro_creditos
+                FROM socios s
+            """
+            df = pd.read_sql_query(query, conn)
+            
     conn.close()
     
     if df.empty:
@@ -136,12 +187,22 @@ def _assign_risk_labels(features_df: pd.DataFrame) -> pd.Series:
     Asigna etiquetas de riesgo basadas en el comportamiento real del socio.
     """
     conn = _get_connection()
-    # Obtener dias_mora máximo de dataset_maestro agrupado por cliente
-    dias_mora_df = pd.read_sql_query("""
-        SELECT cliente as socio_id, MAX(dias_mora) as dias_mora, MAX(es_moroso) as es_moroso 
-        FROM dataset_maestro 
-        GROUP BY cliente
-    """, conn)
+    if _table_exists("dataset_maestro"):
+        # Obtener dias_mora máximo de dataset_maestro agrupado por cliente
+        dias_mora_df = pd.read_sql_query("""
+            SELECT cliente as socio_id, MAX(dias_mora) as dias_mora, MAX(es_moroso) as es_moroso 
+            FROM dataset_maestro 
+            GROUP BY cliente
+        """, conn)
+    else:
+        # Fallback sintético robusto usando tablas relacionales estándar
+        dias_mora_df = pd.read_sql_query("""
+            SELECT 
+                s.id as socio_id,
+                COALESCE((SELECT MAX(p.dias_atraso) FROM pagos p JOIN creditos c ON p.credito_id = c.id WHERE c.socio_id = s.id), 0) as dias_mora,
+                CASE WHEN EXISTS(SELECT 1 FROM creditos c WHERE c.socio_id = s.id AND c.estado = 'Mora') THEN 1 ELSE 0 END as es_moroso
+            FROM socios s
+        """, conn)
     conn.close()
     
     # Cruzar con features
@@ -256,9 +317,18 @@ def train_model() -> dict:
     X = np.nan_to_num(X, nan=0.0, posinf=100.0, neginf=-100.0)
 
     # Split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    unique_classes, counts = np.unique(y, return_counts=True)
+    min_count = np.min(counts) if len(counts) > 0 else 0
+    
+    if min_count >= 2:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+    else:
+        print(f"   [ML] Advertencia: Algunas clases tienen menos de 2 muestras (min: {min_count}). Dividiendo sin estratificacion.")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
 
     # Entrenar modelo
     print("\n[ML] Entrenando Random Forest...")

@@ -15,6 +15,14 @@ function riskBadgeClass(level) {
   return 'bajo';
 }
 
+function formatMetric(val) {
+  if (val === undefined || val === null) return '—';
+  const num = parseFloat(val);
+  if (isNaN(num)) return '—';
+  const percentage = num <= 1 ? num * 100 : num;
+  return `${percentage.toFixed(1)}%`;
+}
+
 function priorityClass(prioridad) {
   const p = (prioridad || '').toLowerCase();
   if (p === 'alta' || p === 'critica') return 'alta';
@@ -336,7 +344,7 @@ export default function AlertsPanel() {
                               onClick={() => navigate(`/socios/${alert.socio_id}`)}
                             >
                               <td className="cell-strong">{alert.socio_nombre}</td>
-                              <td className="cell-muted" style={{ maxWidth: 280 }}>{alert.mensaje || '—'}</td>
+                              <td className="cell-muted" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={alert.mensaje}>{alert.mensaje || '—'}</td>
                               <td className="cell-muted">{alert.tipo}</td>
                               <td>
                                 <span className={`badge ${pClass}`}>
@@ -398,20 +406,26 @@ export default function AlertsPanel() {
                     <div className="info-row">
                       <span className="info-label">Accuracy</span>
                       <span className="info-value" style={{ color: 'var(--coop-verde-primario)' }}>
-                        {((modelInfo.accuracy || 0) * 100).toFixed(1)}%
+                        {formatMetric(modelInfo.accuracy ?? modelInfo.metrics?.accuracy)}
                       </span>
                     </div>
                     <div className="info-row">
                       <span className="info-label">Precision</span>
-                      <span className="info-value">{((modelInfo.precision || 0) * 100).toFixed(1)}%</span>
+                      <span className="info-value">
+                        {formatMetric(modelInfo.precision ?? modelInfo.metrics?.precision)}
+                      </span>
                     </div>
                     <div className="info-row">
                       <span className="info-label">Recall</span>
-                      <span className="info-value">{((modelInfo.recall || 0) * 100).toFixed(1)}%</span>
+                      <span className="info-value">
+                        {formatMetric(modelInfo.recall ?? modelInfo.metrics?.recall)}
+                      </span>
                     </div>
                     <div className="info-row" style={{ border: 'none' }}>
                       <span className="info-label">F1-Score</span>
-                      <span className="info-value">{((modelInfo.f1_score || 0) * 100).toFixed(1)}%</span>
+                      <span className="info-value">
+                        {formatMetric(modelInfo.f1_score ?? modelInfo.metrics?.f1_score ?? modelInfo['f1-score'] ?? modelInfo.metrics?.['f1-score'])}
+                      </span>
                     </div>
                   </>
                 ) : (
