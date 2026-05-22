@@ -1,5 +1,7 @@
 /** Datos de presentación para perfil de socio (demo hackathon). */
 
+import { buildSocioContextIntel } from '../utils/socioContextIntel';
+
 const PORTFOLIO_AVG_MORA = 18.2;
 
 const STAT_BY_SOCIO = {
@@ -98,6 +100,12 @@ export function enrichMockSocio(socio) {
     return arr.findIndex((x) => (x.name || x.description) === key) === i;
   });
 
+  const contexto_externo = buildSocioContextIntel(
+    socio.info || {},
+    socio.risk || {},
+    socio.resumen || {},
+  );
+
   return {
     ...socio,
     risk: {
@@ -107,6 +115,7 @@ export function enrichMockSocio(socio) {
       statistical_adjustment: adjustment,
       portfolio_avg_mora: PORTFOLIO_AVG_MORA,
     },
+    contexto_externo,
   };
 }
 

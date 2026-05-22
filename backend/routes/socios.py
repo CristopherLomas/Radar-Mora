@@ -16,6 +16,7 @@ from database import (
 )
 from models.risk_model import predict_risk, predict_all, model_exists, level_from_score
 from socio_profile_enrichment import enrich_balance_history, enrich_transactions
+from socio_context_intel import build_socio_context_intel
 
 router = APIRouter(prefix="/api/socios", tags=["Socios"])
 
@@ -245,11 +246,14 @@ def get_socio_detail(socio_id: int):
         "en_mora": bool(mora_resumen.get("en_mora")),
     }
 
+    contexto_externo = build_socio_context_intel(info, risk, resumen)
+
     return {
         "info": info,
         "risk": risk,
         "creditos": creditos,
         "resumen": resumen,
+        "contexto_externo": contexto_externo,
     }
 
 

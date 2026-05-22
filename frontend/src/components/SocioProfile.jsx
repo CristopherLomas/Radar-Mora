@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, User, MapPin, Phone, Mail, Calendar, Briefcase, Shield } from 'lucide-react';
 import RiskInterventionPanel from './RiskInterventionPanel';
+import SocioContextIntel from './SocioContextIntel';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 import { sociosAPI } from '../services/api';
 import { formatDiasAtraso, estadoCuotaDisplay, sortCuotasParaDetalle } from '../utils/cuotaAtraso';
@@ -427,6 +428,8 @@ export default function SocioProfile() {
           </div>
         </div>
       </div>
+
+      <SocioContextIntel contexto={data.contexto_externo} />
 
       {/* Evolución de saldo */}
       <div className="card animate-in" style={{ marginBottom: 24 }}>
