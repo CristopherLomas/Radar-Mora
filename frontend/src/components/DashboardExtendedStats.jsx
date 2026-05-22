@@ -512,7 +512,7 @@ className="btn-coop-secondary toggle-stats-btn"
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={extendedStats?.mora_por_cargas || []} margin={{ left: 10, right: 10, bottom: 5 }}>
                   <CartesianGrid {...CHART_GRID} />
-                  <XAxis dataKey="cargas" tick={{ fontSize: 11, fill: 'var(--coop-texto-secundario)' }} />
+                  <XAxis dataKey="cargas" padding={{ left: 30, right: 30 }} tick={{ fontSize: 11, fill: 'var(--coop-texto-secundario)' }} />
                   <YAxis tick={{ fontSize: 11, fill: 'var(--coop-texto-secundario)' }} tickFormatter={(tick) => `${tick}%`} />
                   <Tooltip content={<CustomTooltip />} />
                   <Line type="monotone" dataKey="tasa_mora_monto" name="Tasa Mora (%)" stroke="var(--riesgo-critico)" strokeWidth={3} activeDot={{ r: 6 }} dot={{ r: 4 }} />
