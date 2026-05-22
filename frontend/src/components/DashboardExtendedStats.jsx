@@ -58,6 +58,88 @@ export default function DashboardExtendedStats({ extendedStats, loading = false 
   const [showAllActivities, setShowAllActivities] = useState(false);
   const [activeTab, setActiveTab] = useState('portfolio');
 
+  // Sorting for Activities table
+  const [actSortField, setActSortField] = useState('total_monto');
+  const [actSortDir, setActSortDir] = useState('desc');
+
+  const handleSortAct = (field) => {
+    if (actSortField === field) {
+      setActSortDir(actSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setActSortField(field);
+      setActSortDir('desc');
+    }
+  };
+
+  const sortedActivities = [...(extendedStats?.mora_por_actividad || [])].sort((a, b) => {
+    let aVal = a[actSortField];
+    let bVal = b[actSortField];
+    if (typeof aVal === 'string') {
+      return actSortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    }
+    aVal = aVal || 0;
+    bVal = bVal || 0;
+    return actSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+  });
+
+  // Sorting for Destinos table
+  const [destSortField, setDestSortField] = useState('total_monto');
+  const [destSortDir, setDestSortDir] = useState('desc');
+
+  const handleSortDest = (field) => {
+    if (destSortField === field) {
+      setDestSortDir(destSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setDestSortField(field);
+      setDestSortDir('desc');
+    }
+  };
+
+  const sortedDestinos = [...(extendedStats?.mora_por_destino || [])].sort((a, b) => {
+    let aVal = a[destSortField];
+    let bVal = b[destSortField];
+    if (typeof aVal === 'string') {
+      return destSortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    }
+    aVal = aVal || 0;
+    bVal = bVal || 0;
+    return destSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+  });
+
+  // Helper to render beautiful interactive headers
+  const renderSortableHeader = (label, field, currentField, currentDir, onSort, align = 'left', width) => {
+    const isSorted = currentField === field;
+    const arrow = isSorted ? (currentDir === 'asc' ? ' ▲' : ' ▼') : ' ↕';
+    return (
+      <th 
+        onClick={() => onSort(field)}
+        style={{ 
+          cursor: 'pointer', 
+          textAlign: align, 
+          width: width,
+          userSelect: 'none',
+          whiteSpace: 'nowrap',
+          transition: 'all 0.2s ease',
+          background: isSorted ? 'rgba(0, 150, 64, 0.08)' : 'transparent',
+          borderBottom: isSorted ? '2px solid var(--coop-acento-dorado)' : 'none'
+        }}
+        className="sortable-header"
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: align === 'center' ? 'center' : (align === 'right' ? 'flex-end' : 'flex-start'), width: '100%' }}>
+          {label}
+          <span style={{ 
+            fontSize: '9px', 
+            color: isSorted ? 'var(--coop-acento-dorado)' : 'var(--coop-texto-secundario)',
+            opacity: isSorted ? 1 : 0.4,
+            transition: 'all 0.2s'
+          }}>
+            {arrow}
+          </span>
+        </span>
+      </th>
+    );
+  };
+
   const hasData = extendedStats && (
     (extendedStats.mora_por_tipo?.length || 0) > 0
     || (extendedStats.mora_por_actividad?.length || 0) > 0
@@ -243,17 +325,17 @@ export default function DashboardExtendedStats({ extendedStats, loading = false 
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Actividad Económica</th>
-                        <th style={{ textAlign: 'right' }}>Total Ops</th>
-                        <th style={{ textAlign: 'right' }}>Cartera Total</th>
-                        <th style={{ textAlign: 'right' }}>Ops en Mora</th>
-                        <th style={{ textAlign: 'center', width: '160px' }}>Tasa Morosidad</th>
+                        {renderSortableHeader('Actividad Económica', 'actividad', actSortField, actSortDir, handleSortAct)}
+                        {renderSortableHeader('Total Ops', 'total_ops', actSortField, actSortDir, handleSortAct, 'right')}
+                        {renderSortableHeader('Cartera Total', 'total_monto', actSortField, actSortDir, handleSortAct, 'right')}
+                        {renderSortableHeader('Ops en Mora', 'mora_ops', actSortField, actSortDir, handleSortAct, 'right')}
+                        {renderSortableHeader('Tasa Morosidad', 'tasa_mora_monto', actSortField, actSortDir, handleSortAct, 'center', '160px')}
                       </tr>
                     </thead>
                     <tbody>
                       {(showAllActivities 
-                        ? (extendedStats?.mora_por_actividad || [])
-                        : (extendedStats?.mora_por_actividad?.slice(0, 5) || [])
+                        ? sortedActivities
+                        : sortedActivities.slice(0, 5)
                       ).map((act, i) => {
                         const barColor = moraBarColor(act.tasa_mora_monto);
 
@@ -557,14 +639,14 @@ className="btn-coop-secondary toggle-stats-btn"
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Destino Final</th>
-                        <th style={{ textAlign: 'right' }}>Total Ops</th>
-                        <th style={{ textAlign: 'right' }}>Monto Colocado</th>
-                        <th style={{ textAlign: 'center', width: '150px' }}>Morosidad</th>
+                        {renderSortableHeader('Destino Final', 'destino', destSortField, destSortDir, handleSortDest)}
+                        {renderSortableHeader('Total Ops', 'total_ops', destSortField, destSortDir, handleSortDest, 'right')}
+                        {renderSortableHeader('Monto Colocado', 'total_monto', destSortField, destSortDir, handleSortDest, 'right')}
+                        {renderSortableHeader('Morosidad', 'tasa_mora_monto', destSortField, destSortDir, handleSortDest, 'center', '150px')}
                       </tr>
                     </thead>
                     <tbody>
-                      {(extendedStats?.mora_por_destino || []).map((dest, i) => {
+                      {sortedDestinos.map((dest, i) => {
                         const barColor = moraBarColor(dest.tasa_mora_monto);
 
                         return (
