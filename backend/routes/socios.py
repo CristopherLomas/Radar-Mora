@@ -194,7 +194,7 @@ def get_socio_detail(socio_id: int):
     pagos_totales = execute_query_one(
         """SELECT
             COUNT(*) as total,
-            SUM(CASE WHEN dias_atraso <= 5 AND estado = 'Pagado' THEN 1 ELSE 0 END) as puntuales
+            SUM(CASE WHEN dias_atraso <= 5 AND p.estado = 'Pagado' THEN 1 ELSE 0 END) as puntuales
            FROM pagos p
            JOIN creditos c ON p.credito_id = c.id
            WHERE c.socio_id = ? AND p.estado = 'Pagado'""",

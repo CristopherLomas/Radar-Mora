@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = 'http://127.0.0.1:8000/api';
 
 async function fetchJSON(url) {
   const res = await fetch(url);
@@ -11,6 +11,7 @@ export const dashboardAPI = {
   getRiskDistribution: () => fetchJSON(`${API_BASE}/dashboard/risk-distribution`),
   getTrend: () => fetchJSON(`${API_BASE}/dashboard/trend`),
   getRiskByAgency: () => fetchJSON(`${API_BASE}/dashboard/risk-by-agency`),
+  getExtendedStats: () => fetchJSON(`${API_BASE}/dashboard/extended-stats`),
 };
 
 export const sociosAPI = {

@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api", tags=["Alertas y Modelo"])
 
 
 @router.get("/alerts")
-def get_alerts():
+def get_alerts(limit: int = 150):
     """Genera alertas basadas en el análisis de riesgo y comportamiento."""
 
     alerts = []
@@ -20,19 +20,31 @@ def get_alerts():
         return alerts
 
     risks = predict_all()
-    risk_map = {r["socio_id"]: r for r in risks}
 
     # ─── 1. Socios con riesgo Crítico o Alto ───
-    socios_riesgo = execute_query("""
-        SELECT s.id, s.nombre FROM socios s
-        JOIN creditos c ON c.socio_id = s.id
-        WHERE c.estado IN ('Vigente', 'Mora', 'Reestructurado')
-          AND s.estado = 'Activo'
-        GROUP BY s.id
-    """)
+    # Filtramos y ordenamos los riesgos de forma descendente para procesar solo los más severos
+    critical_and_high_risks = [r for r in risks if r["risk_level"] in ("Crítico", "Alto")]
+    critical_and_high_risks.sort(key=lambda x: x["risk_score"], reverse=True)
+    
+    # Seleccionamos un número controlado de riesgos máximos a evaluar (ej. limit * 2)
+    top_risks = critical_and_high_risks[:max(300, limit * 2)]
+    top_risk_map = {r["socio_id"]: r for r in top_risks}
+
+    if top_risk_map:
+        placeholders = ",".join(["?" for _ in top_risk_map.keys()])
+        socios_riesgo = execute_query(
+            f"SELECT s.id, s.nombre FROM socios s "
+            f"JOIN creditos c ON c.socio_id = s.id "
+            f"WHERE s.id IN ({placeholders}) AND s.estado = 'Activo' "
+            f"AND c.estado IN ('Vigente', 'Mora', 'Reestructurado') "
+            f"GROUP BY s.id",
+            tuple(top_risk_map.keys())
+        )
+    else:
+        socios_riesgo = []
 
     for s in socios_riesgo:
-        risk_data = risk_map.get(s["id"])
+        risk_data = top_risk_map.get(s["id"])
         if not risk_data:
             continue
 
@@ -78,6 +90,7 @@ def get_alerts():
         LIMIT 30
     """)
 
+    risk_map = {r["socio_id"]: r for r in risks}
     for a in atrasos:
         risk_data = risk_map.get(a["socio_id"], {"risk_score": 0, "risk_level": "Sin datos"})
         alert_id += 1
@@ -158,7 +171,7 @@ def get_alerts():
     prioridad_order = {"alta": 0, "media": 1, "baja": 2}
     alerts.sort(key=lambda x: (prioridad_order.get(x["prioridad"], 3), -x["risk_score"]))
 
-    return alerts
+    return alerts[:limit]
 
 
 @router.get("/model/feature-importance")

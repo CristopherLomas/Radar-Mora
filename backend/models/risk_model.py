@@ -8,12 +8,16 @@ import sqlite3
 import numpy as np
 import pandas as pd
 import joblib
+import time
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.preprocessing import LabelEncoder
+
+# In-memory predictions cache
+_PREDICTIONS_CACHE = None
+_CACHE_TIMESTAMP = 0.0
+CACHE_DURATION = 300.0  # 5 minutes cache duration
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,19 +27,18 @@ METADATA_PATH = os.path.join(BASE_DIR, "data", "model_metadata.joblib")
 
 # Feature descriptions in Spanish
 FEATURE_DESCRIPTIONS = {
-    "ratio_pagos_puntuales": "Porcentaje de pagos realizados a tiempo",
-    "promedio_dias_atraso": "Promedio de días de atraso en los últimos 6 meses",
-    "tendencia_atraso": "Tendencia de atraso en el tiempo (positivo = empeorando)",
-    "ratio_monto_pagado": "Porcentaje del monto esperado efectivamente pagado",
-    "frecuencia_depositos": "Número promedio de depósitos mensuales",
-    "frecuencia_retiros": "Número promedio de retiros mensuales",
-    "ratio_retiros_depositos": "Proporción entre retiros y depósitos",
-    "tendencia_saldo": "Tendencia del saldo en el tiempo (negativo = disminuyendo)",
-    "variabilidad_ingresos": "Variabilidad (desviación estándar) de los depósitos",
-    "antiguedad_meses": "Antigüedad como socio en meses",
-    "num_creditos_previos": "Número de créditos anteriores",
-    "monto_credito_actual": "Monto total de créditos vigentes",
-    "ratio_cuota_ingreso": "Proporción entre cuota mensual e ingreso estimado",
+    "saldo_disponible": "Saldo disponible en cuenta de ahorros",
+    "num_transacciones": "Numero de transacciones en el mes",
+    "volumen_total": "Volumen total transaccionado en el mes",
+    "cambio_saldo_ahorro": "Variacion mensual del saldo de ahorros",
+    "alerta_retiro_ahorros": "Alerta por retiro inusual de ahorros",
+    "alerta_caida_actividad": "Alerta por caida de actividad transaccional",
+    "alerta_critica_ia": "Alerta critica de comportamiento financiero",
+    "ingresos_socio": "Ingresos mensuales del socio",
+    "egresos_socio": "Egresos mensuales del socio",
+    "ratio_ingreso_egreso": "Proporcion de ingresos vs egresos",
+    "nro_cargas_fam": "Numero de cargas familiares",
+    "nro_creditos": "Numero de operaciones de credito previas"
 }
 
 FEATURE_NAMES = list(FEATURE_DESCRIPTIONS.keys())
@@ -43,287 +46,142 @@ FEATURE_NAMES = list(FEATURE_DESCRIPTIONS.keys())
 
 def _get_connection():
     """Obtiene conexión a la base de datos."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def compute_features(socio_id: int = None) -> pd.DataFrame:
     """
-    Calcula las features de riesgo para uno o todos los socios con créditos activos.
-    
-    Args:
-        socio_id: ID del socio específico, o None para todos.
-    
-    Returns:
-        DataFrame con socio_id y todas las features calculadas.
+    Recupera las features de riesgo reales desde 'dataset_maestro' en SQLite,
+    agrupadas por cliente (socio_id) para garantizar la unicidad de registros.
     """
     conn = _get_connection()
-    now = datetime(2026, 5, 21)
-    six_months_ago = (now - relativedelta(months=6)).strftime("%Y-%m-%d")
-
-    # Obtener socios con créditos
+    
     if socio_id:
-        socios_query = """
-            SELECT DISTINCT s.id as socio_id, s.fecha_ingreso
-            FROM socios s
-            JOIN creditos c ON c.socio_id = s.id
-            WHERE s.id = ?
+        query = """
+            SELECT 
+                cliente as socio_id,
+                MAX(saldo_disponible) as saldo_disponible,
+                MAX(num_transacciones) as num_transacciones,
+                MAX(volumen_total) as volumen_total,
+                MAX(cambio_saldo_ahorro) as cambio_saldo_ahorro,
+                MAX(alerta_retiro_ahorros) as alerta_retiro_ahorros,
+                MAX(alerta_caida_actividad) as alerta_caida_actividad,
+                MAX(alerta_critica_ia) as alerta_critica_ia,
+                MAX(ingresos_socio) as ingresos_socio,
+                MAX(egresos_socio) as egresos_socio,
+                MAX(nro_cargas_fam) as nro_cargas_fam,
+                COUNT(nro_operacion) as nro_creditos
+            FROM dataset_maestro
+            WHERE cliente = ?
+            GROUP BY cliente
         """
-        socios_df = pd.read_sql_query(socios_query, conn, params=(socio_id,))
+        df = pd.read_sql_query(query, conn, params=(socio_id,))
     else:
-        socios_query = """
-            SELECT DISTINCT s.id as socio_id, s.fecha_ingreso
-            FROM socios s
-            JOIN creditos c ON c.socio_id = s.id
+        query = """
+            SELECT 
+                cliente as socio_id,
+                MAX(saldo_disponible) as saldo_disponible,
+                MAX(num_transacciones) as num_transacciones,
+                MAX(volumen_total) as volumen_total,
+                MAX(cambio_saldo_ahorro) as cambio_saldo_ahorro,
+                MAX(alerta_retiro_ahorros) as alerta_retiro_ahorros,
+                MAX(alerta_caida_actividad) as alerta_caida_actividad,
+                MAX(alerta_critica_ia) as alerta_critica_ia,
+                MAX(ingresos_socio) as ingresos_socio,
+                MAX(egresos_socio) as egresos_socio,
+                MAX(nro_cargas_fam) as nro_cargas_fam,
+                COUNT(nro_operacion) as nro_creditos
+            FROM dataset_maestro
+            GROUP BY cliente
         """
-        socios_df = pd.read_sql_query(socios_query, conn)
-
-    if socios_df.empty:
-        conn.close()
-        return pd.DataFrame()
-
-    socio_ids = socios_df["socio_id"].tolist()
-    placeholders = ",".join(["?" for _ in socio_ids])
-
-    # ────── Datos de Pagos ──────
-    pagos_query = f"""
-        SELECT p.*, c.socio_id, c.cuota_mensual
-        FROM pagos p
-        JOIN creditos c ON p.credito_id = c.id
-        WHERE c.socio_id IN ({placeholders})
-    """
-    pagos_df = pd.read_sql_query(pagos_query, conn, params=socio_ids)
-
-    # ────── Datos de Pagos últimos 6 meses ──────
-    pagos_6m_query = f"""
-        SELECT p.*, c.socio_id
-        FROM pagos p
-        JOIN creditos c ON p.credito_id = c.id
-        WHERE c.socio_id IN ({placeholders})
-          AND p.fecha_esperada >= ?
-    """
-    pagos_6m_df = pd.read_sql_query(pagos_6m_query, conn, params=socio_ids + [six_months_ago])
-
-    # ────── Datos de Créditos ──────
-    creditos_query = f"""
-        SELECT * FROM creditos WHERE socio_id IN ({placeholders})
-    """
-    creditos_df = pd.read_sql_query(creditos_query, conn, params=socio_ids)
-
-    # ────── Datos de Transacciones (últimos 12 meses) ──────
-    twelve_months_ago = (now - relativedelta(months=12)).strftime("%Y-%m-%d")
-    tx_query = f"""
-        SELECT * FROM transacciones
-        WHERE socio_id IN ({placeholders}) AND fecha >= ?
-    """
-    tx_df = pd.read_sql_query(tx_query, conn, params=socio_ids + [twelve_months_ago])
-
+        df = pd.read_sql_query(query, conn)
+        
     conn.close()
-
-    # ────── Calcular Features ──────
-    results = []
-
-    for _, socio_row in socios_df.iterrows():
-        sid = socio_row["socio_id"]
-        features = {"socio_id": sid}
-
-        # Pagos del socio
-        s_pagos = pagos_df[pagos_df["socio_id"] == sid]
-        s_pagos_6m = pagos_6m_df[pagos_6m_df["socio_id"] == sid] if not pagos_6m_df.empty else pd.DataFrame()
-        s_creditos = creditos_df[creditos_df["socio_id"] == sid]
-        s_tx = tx_df[tx_df["socio_id"] == sid] if not tx_df.empty else pd.DataFrame()
-
-        # 1. ratio_pagos_puntuales
-        pagos_pagados = s_pagos[s_pagos["estado"] == "Pagado"]
-        if len(pagos_pagados) > 0:
-            puntuales = len(pagos_pagados[pagos_pagados["dias_atraso"] <= 5])
-            features["ratio_pagos_puntuales"] = round(puntuales / len(pagos_pagados), 4)
-        else:
-            features["ratio_pagos_puntuales"] = 0.0
-
-        # 2. promedio_dias_atraso (últimos 6 meses)
-        if not s_pagos_6m.empty and len(s_pagos_6m) > 0:
-            features["promedio_dias_atraso"] = round(s_pagos_6m["dias_atraso"].mean(), 2)
-        else:
-            features["promedio_dias_atraso"] = 0.0
-
-        # 3. tendencia_atraso (slope of days late over time)
-        if len(s_pagos) >= 3:
-            s_pagos_sorted = s_pagos.sort_values("fecha_esperada")
-            y = s_pagos_sorted["dias_atraso"].values.astype(float)
-            x = np.arange(len(y)).astype(float)
-            if len(x) > 1:
-                slope = np.polyfit(x, y, 1)[0]
-                features["tendencia_atraso"] = round(slope, 4)
-            else:
-                features["tendencia_atraso"] = 0.0
-        else:
-            features["tendencia_atraso"] = 0.0
-
-        # 4. ratio_monto_pagado
-        total_esperado = s_pagos["monto_esperado"].sum()
-        total_pagado = s_pagos["monto_pagado"].sum()
-        if total_esperado > 0:
-            features["ratio_monto_pagado"] = round(total_pagado / total_esperado, 4)
-        else:
-            features["ratio_monto_pagado"] = 1.0
-
-        # 5. frecuencia_depositos (monthly)
-        if not s_tx.empty:
-            depositos = s_tx[s_tx["tipo"] == "Depósito"]
-            n_meses_tx = max(1, len(s_tx["fecha"].str[:7].unique()))
-            features["frecuencia_depositos"] = round(len(depositos) / n_meses_tx, 2)
-        else:
-            features["frecuencia_depositos"] = 0.0
-
-        # 6. frecuencia_retiros (monthly)
-        if not s_tx.empty:
-            retiros = s_tx[s_tx["tipo"].isin(["Retiro", "Transferencia Enviada"])]
-            features["frecuencia_retiros"] = round(len(retiros) / n_meses_tx, 2)
-        else:
-            features["frecuencia_retiros"] = 0.0
-
-        # 7. ratio_retiros_depositos
-        if features["frecuencia_depositos"] > 0:
-            features["ratio_retiros_depositos"] = round(
-                features["frecuencia_retiros"] / features["frecuencia_depositos"], 4
-            )
-        else:
-            features["ratio_retiros_depositos"] = 2.0  # High risk if no deposits
-
-        # 8. tendencia_saldo (slope of balance over time)
-        if not s_tx.empty and len(s_tx) >= 3:
-            s_tx_sorted = s_tx.sort_values("fecha")
-            y_saldo = s_tx_sorted["saldo_resultante"].values.astype(float)
-            x_saldo = np.arange(len(y_saldo)).astype(float)
-            slope_saldo = np.polyfit(x_saldo, y_saldo, 1)[0]
-            features["tendencia_saldo"] = round(slope_saldo, 4)
-        else:
-            features["tendencia_saldo"] = 0.0
-
-        # 9. variabilidad_ingresos
-        if not s_tx.empty:
-            depositos_montos = s_tx[s_tx["tipo"] == "Depósito"]["monto"]
-            if len(depositos_montos) >= 2:
-                features["variabilidad_ingresos"] = round(depositos_montos.std(), 2)
-            else:
-                features["variabilidad_ingresos"] = 0.0
-        else:
-            features["variabilidad_ingresos"] = 0.0
-
-        # 10. antiguedad_meses
-        fecha_ingreso = datetime.strptime(socio_row["fecha_ingreso"], "%Y-%m-%d")
-        features["antiguedad_meses"] = (now.year - fecha_ingreso.year) * 12 + \
-                                        (now.month - fecha_ingreso.month)
-
-        # 11. num_creditos_previos
-        creditos_pagados = len(s_creditos[s_creditos["estado"] == "Pagado"])
-        features["num_creditos_previos"] = creditos_pagados
-
-        # 12. monto_credito_actual
-        creditos_vigentes = s_creditos[s_creditos["estado"].isin(["Vigente", "Mora", "Reestructurado"])]
-        features["monto_credito_actual"] = round(creditos_vigentes["monto"].sum(), 2)
-
-        # 13. ratio_cuota_ingreso
-        cuota_total = creditos_vigentes["cuota_mensual"].sum() if not creditos_vigentes.empty else 0
-        if not s_tx.empty:
-            depositos_mes = s_tx[s_tx["tipo"] == "Depósito"]["monto"]
-            ingreso_estimado = depositos_mes.mean() * features["frecuencia_depositos"] if len(depositos_mes) > 0 else 0
-        else:
-            ingreso_estimado = 0
-
-        if ingreso_estimado > 0:
-            features["ratio_cuota_ingreso"] = round(cuota_total / ingreso_estimado, 4)
-        else:
-            features["ratio_cuota_ingreso"] = 2.0  # High risk
-
-        results.append(features)
-
-    return pd.DataFrame(results)
+    
+    if df.empty:
+        return pd.DataFrame()
+        
+    # Reemplazar NaN en columnas
+    df = df.fillna(0.0)
+        
+    # Calcular feature de ingenieria adicional
+    df["ratio_ingreso_egreso"] = round(df["ingresos_socio"] / np.clip(df["egresos_socio"], 1.0, None), 4)
+    
+    # Asegurar el orden de las columnas de feature
+    columns_ordered = ["socio_id"] + FEATURE_NAMES
+    return df[columns_ordered]
 
 
 def _assign_risk_labels(features_df: pd.DataFrame) -> pd.Series:
     """
-    Asigna etiquetas de riesgo basadas en reglas heurísticas para entrenamiento.
-    Esto crea las labels para el modelo supervisado.
+    Asigna etiquetas de riesgo basadas en el comportamiento real del socio.
     """
+    conn = _get_connection()
+    # Obtener dias_mora máximo de dataset_maestro agrupado por cliente
+    dias_mora_df = pd.read_sql_query("""
+        SELECT cliente as socio_id, MAX(dias_mora) as dias_mora, MAX(es_moroso) as es_moroso 
+        FROM dataset_maestro 
+        GROUP BY cliente
+    """, conn)
+    conn.close()
+    
+    # Cruzar con features
+    mora_map = dias_mora_df.set_index("socio_id").to_dict(orient="index")
+    
     labels = []
-
     for _, row in features_df.iterrows():
+        sid = row["socio_id"]
+        mora_info = mora_map.get(sid, {"dias_mora": 0, "es_moroso": 0})
+        dias_mora = mora_info["dias_mora"]
+        es_moroso = mora_info["es_moroso"]
+        
         score = 0
-
-        # Pagos puntuales (peso alto)
-        if row["ratio_pagos_puntuales"] < 0.3:
+        
+        # 1. Dias de mora (factor directo)
+        if dias_mora > 60:
+            score += 45
+        elif dias_mora > 30:
             score += 35
-        elif row["ratio_pagos_puntuales"] < 0.5:
+        elif dias_mora > 0:
             score += 25
-        elif row["ratio_pagos_puntuales"] < 0.7:
+            
+        # 2. Alertas de comportamiento
+        if row["alerta_critica_ia"] == 1:
+            score += 30
+        if row["alerta_retiro_ahorros"] == 1:
             score += 15
-        elif row["ratio_pagos_puntuales"] < 0.85:
-            score += 5
-
-        # Promedio días atraso
-        if row["promedio_dias_atraso"] > 60:
-            score += 25
-        elif row["promedio_dias_atraso"] > 30:
-            score += 18
-        elif row["promedio_dias_atraso"] > 15:
+        if row["alerta_caida_actividad"] == 1:
+            score += 15
+            
+        # 3. Saldo disponible en cuenta de ahorros (bajo saldo = mas riesgo)
+        saldo = row["saldo_disponible"]
+        if saldo < 10.0:
             score += 10
-        elif row["promedio_dias_atraso"] > 5:
-            score += 4
-
-        # Tendencia atraso
-        if row["tendencia_atraso"] > 2:
-            score += 15
-        elif row["tendencia_atraso"] > 0.5:
-            score += 8
-        elif row["tendencia_atraso"] > 0:
-            score += 3
-
-        # Ratio monto pagado
-        if row["ratio_monto_pagado"] < 0.5:
-            score += 15
-        elif row["ratio_monto_pagado"] < 0.7:
+        elif saldo < 50.0:
+            score += 5
+            
+        # 4. Proporción de ingresos vs egresos
+        ratio = row["ratio_ingreso_egreso"]
+        if ratio < 0.8:
             score += 10
-        elif row["ratio_monto_pagado"] < 0.9:
+        elif ratio < 1.0:
             score += 5
-
-        # Ratio retiros/depositos
-        if row["ratio_retiros_depositos"] > 1.5:
-            score += 8
-        elif row["ratio_retiros_depositos"] > 1.0:
-            score += 4
-
-        # Tendencia saldo
-        if row["tendencia_saldo"] < -10:
-            score += 8
-        elif row["tendencia_saldo"] < -2:
-            score += 4
-
-        # Ratio cuota/ingreso
-        if row["ratio_cuota_ingreso"] > 0.8:
-            score += 8
-        elif row["ratio_cuota_ingreso"] > 0.5:
-            score += 4
-
-        # Antigüedad (más antigüedad = más estable)
-        if row["antiguedad_meses"] < 12:
-            score += 5
-        elif row["antiguedad_meses"] > 60:
-            score -= 3
-
-        # Clasificar
-        if score >= 60:
-            labels.append("Crítico")
-        elif score >= 35:
-            labels.append("Alto")
-        elif score >= 18:
+            
+        # Clasificar en los 4 niveles
+        if score >= 50 or es_moroso == 1:
+            if dias_mora > 30 or row["alerta_critica_ia"] == 1:
+                labels.append("Critico")
+            else:
+                labels.append("Alto")
+        elif score >= 20:
             labels.append("Medio")
         else:
             labels.append("Bajo")
-
-    return pd.Series(labels)
+            
+    # Mapear "Critico" con acento para compatibilidad con frontend
+    return pd.Series([l.replace("Critico", "Crítico") for l in labels])
 
 
 def _compute_risk_score(features_row: dict, model, feature_names: list) -> float:
@@ -347,30 +205,30 @@ def _compute_risk_score(features_row: dict, model, feature_names: list) -> float
 def train_model() -> dict:
     """
     Entrena el modelo de Random Forest y lo guarda en disco.
-    
-    Returns:
-        dict con métricas del modelo.
     """
-    print("\n" + "=" * 60)
-    print("  🤖 Entrenamiento del Modelo de Riesgo Crediticio")
+    global _PREDICTIONS_CACHE
+    _PREDICTIONS_CACHE = None
+    
+    print("=" * 60)
+    print("  [ML] Entrenamiento del Modelo de Riesgo Crediticio")
     print("=" * 60)
 
     # Calcular features
-    print("\n📊 Calculando features para todos los socios...")
+    print("\n[ML] Calculando features para todos los socios...")
     features_df = compute_features()
-    print(f"   ✅ Features calculadas para {len(features_df)} socios")
+    print(f"   OK. Features calculadas para {len(features_df)} socios")
 
     if features_df.empty:
         raise ValueError("No hay datos suficientes para entrenar el modelo")
 
     # Asignar labels
-    print("🏷️  Asignando etiquetas de riesgo...")
+    print("[ML] Asignando etiquetas de riesgo...")
     labels = _assign_risk_labels(features_df)
     features_df["risk_label"] = labels
 
     # Verificar distribución
     label_counts = labels.value_counts()
-    print("   Distribución de riesgo:")
+    print("   Distribucion de riesgo:")
     for level, count in label_counts.items():
         print(f"      - {level}: {count} ({count/len(labels)*100:.1f}%)")
 
@@ -387,10 +245,10 @@ def train_model() -> dict:
     )
 
     # Entrenar modelo
-    print("\n🌲 Entrenando Random Forest...")
+    print("\n[ML] Entrenando Random Forest...")
     model = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=15,
+        n_estimators=100,
+        max_depth=12,
         min_samples_split=5,
         min_samples_leaf=2,
         class_weight="balanced",
@@ -411,7 +269,7 @@ def train_model() -> dict:
         "last_trained": datetime.now().isoformat(),
     }
 
-    print(f"\n📈 Métricas del modelo:")
+    print(f"\n[ML] Metricas del modelo:")
     print(f"   Accuracy:  {metrics['accuracy']:.4f}")
     print(f"   Precision: {metrics['precision']:.4f}")
     print(f"   Recall:    {metrics['recall']:.4f}")
@@ -424,10 +282,10 @@ def train_model() -> dict:
         key=lambda x: x[1],
         reverse=True
     )
-    print(f"\n📊 Importancia de Features:")
+    print(f"\n[ML] Importancia de Features:")
     for fname, imp in importance_ranking:
-        bar = "█" * int(imp * 50)
-        print(f"   {fname:30s} {imp:.4f} {bar}")
+        bar = "=" * int(imp * 50)
+        print(f"   {fname:25s} {imp:.4f} {bar}")
 
     # Guardar modelo y metadata
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
@@ -438,7 +296,7 @@ def train_model() -> dict:
         "feature_importance": importance_ranking,
     }, METADATA_PATH)
 
-    print(f"\n   ✅ Modelo guardado en: {MODEL_PATH}")
+    print(f"\n   OK. Modelo guardado en: {MODEL_PATH}")
     print("=" * 60)
 
     return metrics
@@ -461,9 +319,6 @@ def _load_metadata() -> dict:
 def predict_risk(socio_id: int) -> dict:
     """
     Predice el riesgo para un socio específico.
-    
-    Returns:
-        dict con risk_score, risk_level, feature_values, factors
     """
     model = _load_model()
     features_df = compute_features(socio_id)
@@ -498,37 +353,18 @@ def predict_risk(socio_id: int) -> dict:
         importance = importances[fname]
 
         # Determinar impacto cualitativo
-        if fname == "ratio_pagos_puntuales":
-            if value < 0.5:
-                impact = "negativo"
-            elif value > 0.85:
-                impact = "positivo"
-            else:
-                impact = "neutral"
-        elif fname == "promedio_dias_atraso":
-            if value > 30:
-                impact = "negativo"
-            elif value < 5:
-                impact = "positivo"
-            else:
-                impact = "neutral"
-        elif fname == "tendencia_atraso":
-            impact = "negativo" if value > 0.5 else ("positivo" if value < 0 else "neutral")
-        elif fname == "ratio_monto_pagado":
-            if value < 0.7:
-                impact = "negativo"
-            elif value > 0.95:
-                impact = "positivo"
-            else:
-                impact = "neutral"
-        elif fname == "ratio_retiros_depositos":
-            impact = "negativo" if value > 1.2 else ("positivo" if value < 0.6 else "neutral")
-        elif fname == "tendencia_saldo":
-            impact = "negativo" if value < -5 else ("positivo" if value > 5 else "neutral")
-        elif fname == "ratio_cuota_ingreso":
-            impact = "negativo" if value > 0.6 else ("positivo" if value < 0.3 else "neutral")
-        elif fname == "antiguedad_meses":
-            impact = "positivo" if value > 36 else ("negativo" if value < 12 else "neutral")
+        if fname == "alerta_critica_ia":
+            impact = "negativo" if value == 1 else "positivo"
+        elif fname == "alerta_retiro_ahorros":
+            impact = "negativo" if value == 1 else "positivo"
+        elif fname == "alerta_caida_actividad":
+            impact = "negativo" if value == 1 else "positivo"
+        elif fname == "saldo_disponible":
+            impact = "positivo" if value > 100 else ("negativo" if value < 10 else "neutral")
+        elif fname == "ratio_ingreso_egreso":
+            impact = "positivo" if value >= 1.2 else ("negativo" if value < 0.9 else "neutral")
+        elif fname == "num_transacciones":
+            impact = "positivo" if value > 5 else "neutral"
         else:
             impact = "neutral"
 
@@ -553,45 +389,53 @@ def predict_risk(socio_id: int) -> dict:
 
 def predict_all() -> list[dict]:
     """
-    Predice el riesgo para todos los socios con créditos activos.
-    
-    Returns:
-        Lista de dicts con socio_id, risk_score, risk_level.
+    Predice el riesgo para todos los socios de forma vectorial y ultra rápida (con caché en memoria).
     """
+    global _PREDICTIONS_CACHE, _CACHE_TIMESTAMP
+    now = time.time()
+    if _PREDICTIONS_CACHE is not None and (now - _CACHE_TIMESTAMP) < CACHE_DURATION:
+        return _PREDICTIONS_CACHE
+
     model = _load_model()
     features_df = compute_features()
 
     if features_df.empty:
         return []
 
+    # 1. Preparar matriz X completa de forma vectorial
+    X = features_df[FEATURE_NAMES].values
+    X = np.nan_to_num(X, nan=0.0, posinf=100.0, neginf=-100.0)
+
+    # 2. Predecir todo en una sola llamada matricial
+    risk_levels = model.predict(X)
+    probas_all = model.predict_proba(X)
+    classes = model.classes_
+
+    # Mapear a scores: Bajo=10, Medio=40, Alto=70, Crítico=95
+    class_scores = {"Bajo": 10, "Medio": 40, "Alto": 70, "Crítico": 95}
+    class_weights = np.array([class_scores.get(cls, 50) for cls in classes])
+
+    # Producto matricial (dot product) para obtener todos los scores instantáneamente
+    risk_scores = probas_all.dot(class_weights)
+    risk_scores = np.clip(risk_scores, 0, 100)
+
+    # 3. Construir lista de resultados final de forma directa
     results = []
-    for _, row in features_df.iterrows():
-        feature_values = {f: float(row[f]) for f in FEATURE_NAMES}
-        for k in feature_values:
-            if np.isnan(feature_values[k]) or np.isinf(feature_values[k]):
-                feature_values[k] = 0.0
-
-        X = np.array([[feature_values[f] for f in FEATURE_NAMES]])
-        X = np.nan_to_num(X, nan=0.0, posinf=100.0, neginf=-100.0)
-
-        risk_level = model.predict(X)[0]
-        risk_score = _compute_risk_score(feature_values, model, FEATURE_NAMES)
-
+    for i, (_, row) in enumerate(features_df.iterrows()):
         results.append({
             "socio_id": int(row["socio_id"]),
-            "risk_score": risk_score,
-            "risk_level": risk_level,
+            "risk_score": round(float(risk_scores[i]), 1),
+            "risk_level": risk_levels[i],
         })
 
+    _PREDICTIONS_CACHE = results
+    _CACHE_TIMESTAMP = now
     return results
 
 
 def get_feature_importance() -> list[dict]:
     """
     Retorna el ranking de importancia de features.
-    
-    Returns:
-        Lista de dicts con feature, importance, description.
     """
     metadata = _load_metadata()
     if not metadata or "feature_importance" not in metadata:
@@ -638,12 +482,8 @@ def model_exists() -> bool:
 
 if __name__ == "__main__":
     metrics = train_model()
-    print("\n\nProbando predicción individual...")
-    result = predict_risk(1)
-    print(f"Socio 1: Score={result['risk_score']}, Level={result['risk_level']}")
-
-    print("\nProbando predicción masiva...")
-    all_risks = predict_all()
-    from collections import Counter
-    levels = Counter(r["risk_level"] for r in all_risks)
-    print(f"Distribución: {dict(levels)}")
+    print("\n\nProbando prediccion individual...")
+    if len(predict_all()) > 0:
+        first_id = predict_all()[0]["socio_id"]
+        result = predict_risk(first_id)
+        print(f"Socio {first_id}: Score={result['risk_score']}, Level={result['risk_level']}")

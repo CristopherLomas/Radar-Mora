@@ -125,7 +125,7 @@ export default function SociosList() {
                       <tr key={socio.id} onClick={() => navigate(`/socios/${socio.id}`)}>
                         <td style={{ fontWeight: 600 }}>{socio.nombre}</td>
                         <td style={{ color: 'var(--text-secondary)' }}>{socio.cedula}</td>
-                        <td style={{ color: 'var(--text-secondary)' }}>{socio.agencia}</td>
+                        <td style={{ color: 'var(--text-secondary)' }}>{socio.agencia ? socio.agencia.replace(/^Agencia\s+/i, '') : ''}</td>
                         <td style={{ fontWeight: 500 }}>${(socio.monto || socio.credito_activo || 0).toLocaleString()}</td>
                         <td>
                           <div className="risk-bar">

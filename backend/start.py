@@ -19,41 +19,41 @@ from models.risk_model import train_model, model_exists
 
 def main():
     print("\n" + "=" * 60)
-    print("  🏦 CoopTech Tulcán - Sistema de Riesgo Crediticio")
-    print("  📍 Cooperativa de Ahorro y Crédito")
+    print("  [Bank] CoopTech Tulcan - Sistema de Riesgo Crediticio")
+    print("  [Location] Cooperativa de Ahorro y Credito")
     print("=" * 60)
 
     db_path = get_db_path()
 
     # Paso 1: Generar datos si no existen
     if not db_exists():
-        print("\n📦 Base de datos no encontrada. Generando datos sintéticos...")
+        print("\n[Package] Base de datos no encontrada. Generando datos sinteticos...")
         generate_data(db_path, n_socios=500)
     else:
-        print(f"\n✅ Base de datos encontrada: {db_path}")
+        print(f"\n[OK] Base de datos encontrada: {db_path}")
         print(f"   Socios: {get_table_count('socios')}")
-        print(f"   Créditos: {get_table_count('creditos')}")
+        print(f"   Creditos: {get_table_count('creditos')}")
         print(f"   Pagos: {get_table_count('pagos')}")
         print(f"   Transacciones: {get_table_count('transacciones')}")
 
     # Paso 2: Entrenar modelo si no existe
     if not model_exists():
-        print("\n🤖 Modelo no encontrado. Entrenando modelo de riesgo...")
+        print("\n[AI] Modelo no encontrado. Entrenando modelo de riesgo...")
         metrics = train_model()
-        print(f"\n   ✅ Modelo entrenado con accuracy: {metrics['accuracy']:.4f}")
+        print(f"\n   [OK] Modelo entrenado con accuracy: {metrics['accuracy']:.4f}")
     else:
         from models.risk_model import get_model_info
         info = get_model_info()
-        print(f"\n✅ Modelo cargado")
+        print(f"\n[OK] Modelo cargado")
         print(f"   Accuracy: {info.get('accuracy', 'N/A')}")
-        print(f"   Último entrenamiento: {info.get('last_trained', 'N/A')}")
+        print(f"   Ultimo entrenamiento: {info.get('last_trained', 'N/A')}")
 
     # Paso 3: Iniciar servidor
     print("\n" + "=" * 60)
-    print("  🚀 Iniciando servidor FastAPI...")
-    print("  📡 URL: http://localhost:8000")
-    print("  📖 Docs: http://localhost:8000/docs")
-    print("  🔗 CORS habilitado para: http://localhost:5173")
+    print("  [Server] Iniciando servidor FastAPI...")
+    print("  [URL] URL: http://localhost:8000")
+    print("  [Docs] Docs: http://localhost:8000/docs")
+    print("  [CORS] CORS habilitado para: http://localhost:5173")
     print("=" * 60 + "\n")
 
     import uvicorn

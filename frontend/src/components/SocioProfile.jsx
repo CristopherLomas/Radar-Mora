@@ -142,7 +142,7 @@ export default function SocioProfile() {
           <div className="info-row"><span className="info-label">Cédula</span><span className="info-value">{info.cedula}</span></div>
           <div className="info-row"><span className="info-label">Edad</span><span className="info-value">{info.edad} años</span></div>
           <div className="info-row"><span className="info-label">Ocupación</span><span className="info-value">{info.ocupacion}</span></div>
-          <div className="info-row"><span className="info-label"><MapPin size={12} style={{ display: 'inline', marginRight: 4 }} />Agencia</span><span className="info-value">{info.agencia}</span></div>
+          <div className="info-row"><span className="info-label"><MapPin size={12} style={{ display: 'inline', marginRight: 4 }} />Agencia</span><span className="info-value">{info.agencia ? info.agencia.replace(/^Agencia\s+/i, '') : ''}</span></div>
           <div className="info-row"><span className="info-label"><Calendar size={12} style={{ display: 'inline', marginRight: 4 }} />Socio desde</span><span className="info-value">{info.fecha_ingreso}</span></div>
           <div className="info-row"><span className="info-label"><Phone size={12} style={{ display: 'inline', marginRight: 4 }} />Teléfono</span><span className="info-value">{info.telefono}</span></div>
           <div className="info-row"><span className="info-label"><Mail size={12} style={{ display: 'inline', marginRight: 4 }} />Email</span><span className="info-value" style={{ fontSize: 11 }}>{info.email}</span></div>

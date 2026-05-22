@@ -15,12 +15,28 @@ def get_db_path() -> str:
     return DB_PATH
 
 
+# Configurar WAL de forma persistente y segura en un solo paso
+def init_db_journal_mode():
+    """Configura el modo WAL en la base de datos una sola vez para evitar bloqueos."""
+    try:
+        os.makedirs(DB_DIR, exist_ok=True)
+        # Usamos timeout largo para evitar bloqueos
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.close()
+    except Exception as e:
+        print(f"Advertencia: No se pudo configurar PRAGMA journal_mode=WAL: {e}")
+
+# Inicializamos el modo de base de datos una única vez al importar el módulo
+init_db_journal_mode()
+
+
 @contextmanager
 def get_connection():
     """Context manager para obtener una conexión a SQLite con row_factory."""
-    conn = sqlite3.connect(DB_PATH)
+    # Añadimos un timeout de 30 segundos para evitar colisiones en escrituras/lecturas
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
