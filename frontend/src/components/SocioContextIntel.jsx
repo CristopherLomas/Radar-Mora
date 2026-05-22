@@ -64,15 +64,8 @@ export default function SocioContextIntel({ contexto }) {
             </p>
           </div>
           <div className="context-intel-pred-stats">
-            <div className="context-intel-prob-ring" style={{ '--prob': pred?.prob_impago_por_evento_pct || 0 }}>
-              <span className="context-intel-prob-value">{pred?.prob_impago_por_evento_pct}%</span>
-              <span className="context-intel-prob-label">Prob. no pago</span>
-            </div>
             <span className={`badge ${(pred?.nivel || 'Medio').toLowerCase().replace('í', 'i')}`}>
               {pred?.nivel}
-            </span>
-            <span className="context-intel-conf">
-              Confianza {(Number(pred?.confianza || 0) * 100).toFixed(0)}%
             </span>
           </div>
         </div>
@@ -116,9 +109,6 @@ export default function SocioContextIntel({ contexto }) {
                   <div className="context-intel-news-foot">
                     <span>{n.fuente}</span>
                     <span>{formatFecha(n.fecha)}</span>
-                    <span className="context-intel-relevance">
-                      Relevancia {(Number(n.relevancia) * 100).toFixed(0)}%
-                    </span>
                   </div>
                 </li>
               );
