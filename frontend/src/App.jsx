@@ -26,21 +26,25 @@ function App() {
       <div className="app-shell">
         <AppHeader />
         <main className="main-content">
-            {apiOk === false && <ApiOfflineBanner />}
-            {apiOk === null && (
-              <div className="loading-container" style={{ minHeight: 120 }}>
-                <div className="spinner" />
-                <div className="loading-text">Comprobando conexión con el servidor...</div>
-              </div>
-            )}
-            {apiOk !== false && (
+          {apiOk === false && <ApiOfflineBanner />}
+          {apiOk === null && (
+            <div className="loading-container" style={{ minHeight: 120 }}>
+              <div className="spinner" />
+              <div className="loading-text">Comprobando conexión con el servidor…</div>
+              <p style={{ marginTop: 12, fontSize: 13, color: 'var(--coop-texto-secundario)', maxWidth: 520, textAlign: 'center' }}>
+                La primera vez el backend puede tardar varios minutos generando datos. Ejecuta{' '}
+                <code>.\venv\Scripts\python.exe start.py</code> dentro de <code>backend</code>.
+              </p>
+            </div>
+          )}
+          {apiOk === true && (
             <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/socios" element={<SociosList />} />
-            <Route path="/socios/:id" element={<SocioProfile />} />
-            <Route path="/alertas" element={<AlertsPanel />} />
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/socios" element={<SociosList />} />
+              <Route path="/socios/:id" element={<SocioProfile />} />
+              <Route path="/alertas" element={<AlertsPanel />} />
             </Routes>
-            )}
+          )}
         </main>
       </div>
     </Router>

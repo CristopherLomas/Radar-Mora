@@ -658,7 +658,10 @@ def get_model_info() -> dict:
     """Retorna información y métricas del modelo."""
     metadata = _load_metadata()
     if metadata and "metrics" in metadata:
-        return metadata["metrics"]
+        info = dict(metadata["metrics"])
+        info.setdefault("model_name", "Random Forest")
+        info["total_samples"] = info.get("total_predictions", info.get("total_samples", 0))
+        return info
     return {
         "accuracy": 0,
         "precision": 0,

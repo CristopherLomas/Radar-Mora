@@ -4,7 +4,7 @@ dashboard_extended.py - Estadisticas avanzadas (dataset maestro de produccion).
 import time
 from fastapi import APIRouter
 from database import execute_query, execute_query_one
-from routes.dashboard_extended_synthetic import get_extended_stats_synthetic
+from .dashboard_extended_synthetic import get_extended_stats_synthetic
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 

@@ -370,12 +370,12 @@ export default function SocioProfile() {
                       {c.estado}
                     </span>
                   </td>
-                  <td>
+                      <td>
                     <div className="risk-bar">
                       <div className="risk-bar-track" style={{ maxWidth: 60 }}>
-                        <div className="risk-bar-fill" style={{ width: `${(c.progreso || 0) * 100}%`, background: COOP.acentoDorado }} />
+                        <div className="risk-bar-fill" style={{ width: `${Math.min(100, c.progreso || 0)}%`, background: COOP.acentoDorado }} />
                       </div>
-                      <span className="cell-muted" style={{ fontSize: 12 }}>{((c.progreso || 0) * 100).toFixed(0)}%</span>
+                      <span className="cell-muted" style={{ fontSize: 12 }}>{(c.progreso || 0).toFixed(0)}%</span>
                     </div>
                   </td>
                 </tr>
