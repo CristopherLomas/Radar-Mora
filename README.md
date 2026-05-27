@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Ganador Hackathon](https://img.shields.io/badge/🥇%20GANADOR-CoopTech%20Hackathon%202026-gold?style=for-the-badge&logo=trophy)
+![Ganador DevIAthon](https://img.shields.io/badge/🥇%20GANADOR-CoopTech%20Hackathon%202026-gold?style=for-the-badge&logo=trophy)
 ![Equipo](https://img.shields.io/badge/Equipo-Toad%20Code-6DB33F?style=for-the-badge&logo=frog&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![React](https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
